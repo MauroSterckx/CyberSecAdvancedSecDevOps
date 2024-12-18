@@ -1,18 +1,16 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python application
+name: Secure Python Pipeline
 
 on:
   push:
-    branches: [ "dev" ]
+    branches: [ "dev" ] # Pushes naar dev branch triggeren de workflow
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master" ] # Pull requests naar main triggeren de workflow
   schedule:
     - cron: "0 0 * * 0" # Wekelijkse scan op zondag om middernacht
 
 permissions:
   contents: read
+
 jobs:
   security-checks:
 
@@ -59,7 +57,4 @@ jobs:
       with:
         scan-directory: .
 
-  # Block PRs with warnings or failures
-  pull_request:
-    if: ${{ failure() }}
 
