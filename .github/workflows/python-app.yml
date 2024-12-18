@@ -38,17 +38,16 @@ jobs:
           name: report.sarif
           path: report.sarif
 
+  download-report:
+    runs-on: ubuntu-latest
+    needs: security-checks # Zorg ervoor dat dit pas na de security-checks wordt uitgevoerd
+    steps:
+      - name: Download Semgrep report
+        uses: actions/download-artifact@v4
+        with:
+          name: report.sarif
+          path: ./reports
 
-    download-report:
-      runs-on: ubuntu-latest
-      needs: security-checks  # Zorg ervoor dat dit pas na de security-checks wordt uitgevoerd
-      steps:
-        - name: Download Semgrep report
-          uses: actions/download-artifact@v4
-          with:
-            name: report.sarif
-            path: ./reports
-            
       # Step 5: Check the status of the scan and block PR if it fails
       - name: Check Semgrep report status
         run: |
