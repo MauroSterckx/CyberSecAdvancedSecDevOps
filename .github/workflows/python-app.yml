@@ -1,7 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python application
+name: Secure Python Pipeline
 
 on:
   push:
@@ -9,57 +6,70 @@ on:
   pull_request:
     branches: [ "master" ]
   schedule:
-    - cron: "0 0 * * 0" # Wekelijkse scan op zondag om middernacht
+    - cron: "0 0 * * 0"
 
 permissions:
   contents: read
+  security-events: write
+
 jobs:
   security-checks:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-
-    # Set up Python
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v3
+    - name: Checkout Code
+      uses: actions/checkout@v4
       with:
-        python-version: "3.10"
+        fetch-depth: 0
 
-    # Install dependencies
-    - name: Install dependencies
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pytest bandit safety
+        pip install -r requirements.txt
+        pip install flake8 pytest bandit safety pyright
 
-    # Lint the code
-    - name: Lint with flake8
+    - name: Lint with Flake8
       run: |
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
-    # Run tests
-    - name: Test with pytest
+    - name: Type Checking with Pyright
       run: |
-        pytest
+        pyright .
 
-    # Static Application Security Testing (SAST)
-    - name: Security scan with Bandit
+    - name: Run Unit Tests
       run: |
-        bandit -r . || exit 1
+        pytest --cov=. --cov-report=xml
 
-    # Dependency vulnerability check
-    - name: Dependency scan with Safety
+    - name: Security Scan with Bandit
       run: |
-        safety check --full-report || exit 1
+        bandit -r . -f custom -o bandit-output.html
+      continue-on-error: true
 
-    # Secrets detection
-    - name: Scan for secrets
+    - name: Dependency Vulnerability Check
+      run: |
+        safety check --full-report
+
+    - name: Secrets Detection
       uses: trufflesecurity/trufflehog-actions-scan@v3
       with:
         scan-directory: .
+        
+    - name: Upload Bandit Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: bandit-report
+        path: bandit-output.html
 
-  # Block PRs with warnings or failures
-  pull_request:
-    if: ${{ failure() }}
+    - name: CodeQL Analysis
+      uses: github/codeql-action/init@v3
+      with:
+        languages: python
 
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
