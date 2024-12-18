@@ -33,9 +33,7 @@ jobs:
 
       # Voeg CodeQL toe voor SAST
       - name: Set up CodeQL
-        uses: github/codeql-action/setup@v2
-        with:
-          languages: python # Specificeer de programmeertaal (Python in dit geval)
+        uses: github/codeql-action/setup@v2 # Correcte versie van setup
 
       - name: Initialize CodeQL database
         uses: github/codeql-action/autobuild@v2
