@@ -11,50 +11,154 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 
 jobs:
   security-checks:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Clone application source code
+      # Step 1: Clone repository
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-        # Installeer Semgrep voor de SAST scan
-      - name: Install Semgrep
-        run: |
-          python -m pip install semgrep
-
-      # Step 2: Run Semgrep for Static Application Security Testing (SAST)
-      - name: Run full scan with Semgrep
-        run: |
-          semgrep --sarif --output report.sarif --metrics=off --config="p/default"
-        continue-on-error: false # Zorg ervoor dat de job faalt als Semgrep een probleem vindt
-
-      # Step 3: Save the report as an artifact
-      - name: Save report as pipeline artifact
-        uses: actions/upload-artifact@v3
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          name: report.sarif
-          path: report.sarif
+          python-version: "3.10"
 
-  download-report:
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep bandit safety
+
+      # Step 4: Run Semgrep SAST Scan
+      - name: Run Semgrep Security Scan
+        id: semgrep
+        run: |
+          semgrep scan --config=r/all --sarif --output semgrep-results.sarif
+        continue-on-error: false
+
+      # Step 5: Run Bandit Security Scan
+      - name: Run Bandit Security Scan
+        run: |
+          bandit -r . -f sarif -o bandit-results.sarif
+        continue-on-error: false
+
+      # Step 6: Dependency Vulnerability Check
+      - name: Check Dependencies for Vulnerabilities
+        run: |
+          safety check --full-report
+        continue-on-error: false
+
+      # Step 7: Upload Scan Results
+      - name: Upload SARIF files
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scans
+          path: |
+            semgrep-results.sarif
+            bandit-results.sarif
+          retention-days: 5
+
+  analyze-results:
+    needs: security-checks
     runs-on: ubuntu-latest
-    needs: security-checks # Zorg ervoor dat dit pas na de security-checks wordt uitgevoerd
     steps:
-      - name: Download Semgrep report
+      # Step 1: Download artifacts
+      - name: Download scan results
         uses: actions/download-artifact@v4
         with:
-          name: report.sarif
-          path: ./reports
+          name: security-scans
 
-      # Step 5: Check the status of the scan and block PR if it fails
-      - name: Check Semgrep report status
+      # Step 2: Analyze Semgrep Results
+      - name: Analyze Semgrep Results
         run: |
-          if [ -f report.sarif ]; then
-            # Als er resultaten zijn, betekent dit dat er kwetsbaarheden zijn gevonden
-            jq '.results | length' report.sarif | grep -q '0' || exit 1
+          if [ -f semgrep-results.sarif ]; then
+            # Fail if any security issues are found
+            issues=$(jq '.runs[].results | length' semgrep-results.sarif)
+            if [ "$issues" -gt 0 ]; then
+              echo "Semgrep found $issues security issues"
+              exit 1
+            fi
           else
-            echo "Semgrep report not found, exiting"
+            echo "Semgrep results file not found"
             exit 1
-        continue-on-error: false # Als er kwetsbaarheden zijn, zorgt dit ervoor dat de workflow faalt
+          fi
+
+      # Step 3: Analyze Bandit Results
+      - name: Analyze Bandit Results
+        run: |
+          if [ -f bandit-results.sarif ]; then
+            # Fail if any high or medium severity issues are found
+            high_medium_issues=$(jq '.runs[].results[] | select(.level | contains(["warning", "error"])) | length' bandit-results.sarif)
+            if [ "$high_medium_issues" -gt 0 ]; then
+              echo "Bandit found $high_medium_issues high or medium severity issues"
+              exit 1
+            fi
+          else
+            echo "Bandit results file not found"
+            exit 1
+          fi
+
+# name: Secure Python Pipeline
+
+# on:
+#   push:
+#     branches: ["dev"]
+#   pull_request:
+#     branches: ["master"]
+#   schedule:
+#     - cron: "0 0 * * 0"
+
+# permissions:
+#   contents: read
+#   security-events: write
+
+# jobs:
+#   security-checks:
+#     runs-on: ubuntu-latest
+#     steps:
+#       # Step 1: Clone application source code
+#       - name: Checkout code
+#         uses: actions/checkout@v3
+
+#         # Installeer Semgrep voor de SAST scan
+#       - name: Install Semgrep
+#         run: |
+#           python -m pip install semgrep
+
+#       # Step 2: Run Semgrep for Static Application Security Testing (SAST)
+#       - name: Run full scan with Semgrep
+#         run: |
+#           semgrep --sarif --output report.sarif --metrics=off --config="p/default"
+#         continue-on-error: false # Zorg ervoor dat de job faalt als Semgrep een probleem vindt
+
+#       # Step 3: Save the report as an artifact
+#       - name: Save report as pipeline artifact
+#         uses: actions/upload-artifact@v3
+#         with:
+#           name: report.sarif
+#           path: report.sarif
+
+#   download-report:
+#     runs-on: ubuntu-latest
+#     needs: security-checks # Zorg ervoor dat dit pas na de security-checks wordt uitgevoerd
+#     steps:
+#       - name: Download Semgrep report
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: report.sarif
+#           path: ./reports
+
+#       # Step 5: Check the status of the scan and block PR if it fails
+#       - name: Check Semgrep report status
+#         run: |
+#           if [ -f report.sarif ]; then
+#             # Als er resultaten zijn, betekent dit dat er kwetsbaarheden zijn gevonden
+#             jq '.results | length' report.sarif | grep -q '0' || exit 1
+#           else
+#             echo "Semgrep report not found, exiting"
+#             exit 1
+#         continue-on-error: false # Als er kwetsbaarheden zijn, zorgt dit ervoor dat de workflow faalt
