@@ -17,90 +17,97 @@ jobs:
   security-checks:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Clone repository
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Step 2: Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install semgrep bandit safety
-
-      # Step 4: Run Semgrep SAST Scan
-      - name: Run Semgrep Security Scan
-        id: semgrep
-        run: |
-          semgrep scan --config=r/all --sarif --output semgrep-results.sarif
-        continue-on-error: false
-
-      # Step 5: Run Bandit Security Scan
-      - name: Run Bandit Security Scan
-        run: |
-          bandit -r . -f sarif -o bandit-results.sarif
-        continue-on-error: false
-
-      # Step 6: Dependency Vulnerability Check
-      - name: Check Dependencies for Vulnerabilities
-        run: |
-          safety check --full-report
-        continue-on-error: false
-
-      # Step 7: Upload Scan Results
-      - name: Upload SARIF files
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-scans
-          path: |
-            semgrep-results.sarif
-            bandit-results.sarif
-          retention-days: 5
-
+    # Step 1: Clone repository
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Step 2: Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    # Step 3: Install dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install semgrep bandit safety
+        pip install jq
+    
+    # Step 4: Run Semgrep SAST Scan
+    - name: Run Semgrep Security Scan
+      run: |
+        semgrep scan --config=r/all --json --output semgrep-results.json
+      continue-on-error: false
+    
+    # Step 5: Run Bandit Security Scan
+    - name: Run Bandit Security Scan
+      run: |
+        bandit -r . -f json -o bandit-results.json
+      continue-on-error: false
+    
+    # Step 6: Dependency Vulnerability Check
+    - name: Check Dependencies for Vulnerabilities
+      run: |
+        safety check --full-report
+      continue-on-error: false
+    
+    # Step 7: Upload Scan Results
+    - name: Upload Scan Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-scans
+        path: |
+          semgrep-results.json
+          bandit-results.json
+        retention-days: 5
+  
   analyze-results:
     needs: security-checks
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Download artifacts
-      - name: Download scan results
-        uses: actions/download-artifact@v4
-        with:
-          name: security-scans
-
-      # Step 2: Analyze Semgrep Results
-      - name: Analyze Semgrep Results
-        run: |
-          if [ -f semgrep-results.sarif ]; then
-            # Fail if any security issues are found
-            issues=$(jq '.runs[].results | length' semgrep-results.sarif)
-            if [ "$issues" -gt 0 ]; then
-              echo "Semgrep found $issues security issues"
-              exit 1
-            fi
-          else
-            echo "Semgrep results file not found"
+    # Step 1: Download artifacts
+    - name: Download scan results
+      uses: actions/download-artifact@v4
+      with:
+        name: security-scans
+    
+    # Step 2: Analyze Semgrep Results
+    - name: Analyze Semgrep Results
+      run: |
+        if [ -f semgrep-results.json ]; then
+          issues=$(jq '.results | length' semgrep-results.json)
+          if [ "$issues" -gt 0 ]; then
+            echo "Semgrep found $issues security issues"
+            jq '.results' semgrep-results.json
             exit 1
           fi
-
-      # Step 3: Analyze Bandit Results
-      - name: Analyze Bandit Results
-        run: |
-          if [ -f bandit-results.sarif ]; then
-            # Fail if any high or medium severity issues are found
-            high_medium_issues=$(jq '.runs[].results[] | select(.level | contains(["warning", "error"])) | length' bandit-results.sarif)
-            if [ "$high_medium_issues" -gt 0 ]; then
-              echo "Bandit found $high_medium_issues high or medium severity issues"
-              exit 1
-            fi
-          else
-            echo "Bandit results file not found"
+        else
+          echo "Semgrep results file not found"
+          exit 1
+        fi
+    
+    # Step 3: Analyze Bandit Results
+    - name: Analyze Bandit Results
+      run: |
+        if [ -f bandit-results.json ]; then
+          # Fail if any issues are found
+          total_issues=$(jq '.results | length' bandit-results.json)
+          high_issues=$(jq '.results[] | select(.issue_severity == "HIGH") | length' bandit-results.json)
+          
+          if [ "$total_issues" -gt 0 ]; then
+            echo "Bandit found $total_issues total issues"
+            echo "High severity issues: $high_issues"
+            
+            # Optional: print out detailed issues
+            jq '.results[] | {filename: .filename, line_number: .line_number, issue_text: .issue_text, issue_severity: .issue_severity}' bandit-results.json
+            
             exit 1
           fi
+        else
+          echo "Bandit results file not found"
+          exit 1
+        fi
 
 # name: Secure Python Pipeline
 
